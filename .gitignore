@@ -1,0 +1,41 @@
+# Virtual environment
+venv/
+env/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Database
+instance/
+proctoring.db
+*.db
+
+# Secrets / environment variables
+.env
+
+# Uploaded and generated media (student data — should not be in version control)
+static/id_photos/
+static/verification_snapshots/
+static/violation_snapshots/
+static/violation_clips/
+static/recordings/
+face_signatures/
+
+# Downloaded model files (large, auto-downloaded on first run)
+detection/face_landmarker.task
+yolo/*.pt
+
+# Editor/OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+static/passport_photos/
+
+calibrate.json

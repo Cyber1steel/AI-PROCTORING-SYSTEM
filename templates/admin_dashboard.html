@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Piazzolla:ital,wght@0,500;0,600;0,700;1,500&family=Archivo:wght@400;500;600;700&family=Fragment+Mono&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/admin_dash.css') }}">
+</head>
+<body>
+
+    <header class="masthead">
+        <div class="masthead-inner">
+            <h1 id="greeting">Admin Dashboard</h1>
+        </div>
+    </header>
+
+    <main class="ledger">
+
+        <nav class="tabs" role="tablist">
+            <button class="tab-btn active" onclick="showTab('create', event)" role="tab" aria-selected="true">Create Exam</button>
+            <button class="tab-btn" onclick="showTab('review', event)" role="tab" aria-selected="false">Review Exams</button>
+        </nav>
+
+        <!-- CREATE EXAM SECTION -->
+        <section id="createSection" class="tab-section">
+            <div class="entry-card">
+                <h2>New exam entry</h2>
+                <p class="entry-sub">Set the schedule and register the students sitting it.</p>
+
+                <form id="createExamForm">
+                    <div class="field-row">
+                        <label class="field">
+                            <span class="field-label">Course code</span>
+                            <input type="text" id="courseCode" placeholder="DS402" required>
+                        </label>
+                        <label class="field field-grow">
+                            <span class="field-label">Course title</span>
+                            <input type="text" id="courseTitle" placeholder="Applied Machine Learning" required>
+                        </label>
+                    </div>
+
+                    <div class="field-row">
+                        <label class="field">
+                            <span class="field-label">Start time</span>
+                            <input type="datetime-local" id="startTime" required>
+                        </label>
+                        <label class="field">
+                            <span class="field-label">Duration (hours)</span>
+                            <input type="number" id="durationHours" placeholder="2" step="0.5" required>
+                        </label>
+                    </div>
+
+                    <label class="field">
+                        <span class="field-label">Student IDs</span>
+                        <textarea id="studentIds" placeholder="STU-1234, STU-5678, STU-9012" required></textarea>
+                        <span class="field-hint">Comma-separated</span>
+                    </label>
+
+                    <button type="submit" class="btn-primary">Create exam</button>
+                </form>
+                <p id="createMsg" class="create-msg"></p>
+            </div>
+        </section>
+
+        <!-- REVIEW EXAMS SECTION -->
+        <section id="reviewSection" class="tab-section" style="display:none;">
+            <div class="review-head">
+                <h2>Session register</h2>
+                <input type="text" id="searchBox" placeholder="Search by name, ID, or email">
+            </div>
+
+            <div id="sessionsList" class="sessions-list">Loading…</div>
+
+            <div id="violationDetail" class="violation-drawer" style="display:none;">
+                <div class="violation-drawer-head">
+                    <h3 id="detailTitle"></h3>
+                    <button onclick="closeDetail()" class="btn-close">Close</button>
+                </div>
+                <div id="violationList" class="violation-list"></div>
+            </div>
+        </section>
+
+    </main>
+
+    <script>
+        const adminId = localStorage.getItem('user_id');
+        const adminName = localStorage.getItem('name');
+        document.getElementById('greeting').innerText = adminName ? `Welcome, ${adminName}` : "Admin Dashboard";
+
+        function showTab(tab, event) {
+            document.getElementById('createSection').style.display = tab === 'create' ? 'block' : 'none';
+            document.getElementById('reviewSection').style.display = tab === 'review' ? 'block' : 'none';
+            document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+            event.target.classList.add('active');
+            event.target.setAttribute('aria-selected', 'true');
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                if (btn !== event.target) btn.setAttribute('aria-selected', 'false');
+            });
+
+            if (tab === 'review') loadSessions();
+        }
+
+        // ---- CREATE EXAM ----
+        document.getElementById('createExamForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const courseCode = document.getElementById('courseCode').value;
+            const courseTitle = document.getElementById('courseTitle').value;
+            const startTime = document.getElementById('startTime').value;
+            const durationHours = parseFloat(document.getElementById('durationHours').value);
+            const studentIdsRaw = document.getElementById('studentIds').value;
+            const studentIds = studentIdsRaw.split(',').map(id => id.trim()).filter(id => id.length > 0);
+            const createMsg = document.getElementById('createMsg');
+
+            try {
+                const res = await fetch('/api/exam/create', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        course_code: courseCode,
+                        course_title: courseTitle,
+                        start_time: startTime,
+                        time_hours: durationHours,
+                        admin_id: adminId,
+                        student_ids: studentIds
+                    })
+                });
+                const data = await res.json();
+
+                if (!res.ok) {
+                    createMsg.innerText = data.error || "Failed to create exam";
+                    createMsg.classList.remove('msg-success');
+                    createMsg.classList.add('msg-error');
+                    return;
+                }
+
+                createMsg.innerText = `Exam created — ID ${data.exam_id}`;
+                createMsg.classList.remove('msg-error');
+                createMsg.classList.add('msg-success');
+                document.getElementById('createExamForm').reset();
+            } catch (err) {
+                createMsg.innerText = "Something went wrong.";
+                createMsg.classList.remove('msg-success');
+                createMsg.classList.add('msg-error');
+            }
+        });
+
+        // ---- REVIEW EXAMS ----
+        let allSessions = [];
+
+        async function loadSessions() {
+            const sessionsList = document.getElementById('sessionsList');
+            try {
+                const res = await fetch('/api/exam/admin/sessions');
+                allSessions = await res.json();
+                renderSessions(allSessions);
+            } catch (err) {
+                sessionsList.innerText = "Failed to load sessions.";
+            }
+        }
+
+        function renderSessions(sessions) {
+            const sessionsList = document.getElementById('sessionsList');
+
+            if (sessions.length === 0) {
+                sessionsList.innerHTML = '<p class="empty-state">No exam sessions yet.</p>';
+                return;
+            }
+
+            const sorted = [...sessions].sort((a, b) => a.student_name.localeCompare(b.student_name));
+
+            sessionsList.innerHTML = '';
+            sorted.forEach(s => {
+                const row = document.createElement('div');
+                row.className = 'session-row';
+                const flagClass = s.violation_count > 0 ? 'flag-count flag-count-active' : 'flag-count';
+                row.innerHTML = `
+                    <div class="session-info">
+                        <span class="session-name">${s.student_name}</span>
+                        <span class="session-meta">${s.student_id} — ${s.student_email}</span>
+                        <span class="session-status">Status: ${s.status} &nbsp;·&nbsp; Flags: <span class="${flagClass}">${s.violation_count}</span></span>
+                    </div>
+                    <button onclick="viewViolations(${s.session_id}, '${s.student_name}')" class="btn-secondary">Review</button>
+                `;
+                sessionsList.appendChild(row);
+            });
+        }
+
+        document.getElementById('searchBox').addEventListener('input', (e) => {
+            const query = e.target.value.toLowerCase();
+            const filtered = allSessions.filter(s =>
+                s.student_name.toLowerCase().includes(query) ||
+                s.student_id.toLowerCase().includes(query) ||
+                s.student_email.toLowerCase().includes(query)
+            );
+            renderSessions(filtered);
+        });
+
+        async function viewViolations(sessionId, studentName) {
+            const res = await fetch(`/api/exam/admin/session/${sessionId}/violations`);
+            const violations = await res.json();
+
+            document.getElementById('detailTitle').innerText = `Flags for ${studentName}`;
+            const violationList = document.getElementById('violationList');
+
+            if (violations.length === 0) {
+                violationList.innerHTML = '<p class="empty-state">No flags for this session.</p>';
+            } else {
+                violationList.innerHTML = violations.map(v => `
+                    <div class="violation-item">
+                        <span class="violation-type">${v.event_type}</span>
+                        <span class="violation-time">${v.timestamp}</span>
+                        ${v.confidence ? `<span class="violation-confidence">confidence ${v.confidence}</span>` : ''}
+                        ${v.snapshot_url ? `
+                            <a href="${v.snapshot_url}" target="_blank">
+                                <img src="${v.snapshot_url}" alt="snapshot" style="max-width:200px; margin-top:8px; display:block; border-radius:6px;">
+                            </a>
+                        ` : ''}
+                    </div>
+                `).join('');
+            }
+
+            document.getElementById('violationDetail').style.display = 'block';
+            document.getElementById('violationDetail').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+
+        function closeDetail() {
+            document.getElementById('violationDetail').style.display = 'none';
+        }
+    </script>
+</body>
+</html>

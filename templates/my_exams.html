@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Exams</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Piazzolla:ital,wght@0,500;0,600&family=Archivo:wght@400;500;600&family=Fragment+Mono&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/my_exams.css') }}">
+</head>
+<body>
+    <div class="topbar">
+        <h2 id="greeting">Welcome</h2>
+    </div>
+
+    <div class="place">
+        <section class="exam-section">
+            <p class="eyebrow">Upcoming</p>
+            <div id="upcomingList" class="exam-grid">Loading...</div>
+        </section>
+
+        <section class="exam-section">
+            <p class="eyebrow">Previous</p>
+            <div id="previousList" class="exam-grid">Loading...</div>
+        </section>
+    </div>
+
+    <script>
+        const studentId = localStorage.getItem('student_id');
+        const studentName = localStorage.getItem('name');
+
+        document.getElementById('greeting').innerText = studentName ? `Welcome, ${studentName}` : "Welcome";
+
+        function buildExamCard(exam, isPrevious) {
+            const card = document.createElement('div');
+            card.className = 'exam-card';
+
+            const statusLabel = isPrevious
+                ? (exam.session_status === 'completed' ? 'Completed' : 'Missed')
+                : '';
+
+            card.innerHTML = `
+                <p class="course-code">${exam.course_code}</p>
+                <h3>${exam.course_title}</h3>
+                <p class="meta">Starts: ${new Date(exam.start_time).toLocaleString()}</p>
+                <p class="meta">Duration: ${exam.time_hours} hour(s)</p>
+                ${isPrevious
+                    ? `<p class="status-label ${exam.session_status === 'completed' ? 'is-completed' : 'is-missed'}">${statusLabel}</p>`
+                    : `<button onclick="startExam(${exam.exam_id})">Start exam</button>`
+                }
+            `;
+            return card;
+        }
+
+        async function loadExams() {
+            const upcomingDiv = document.getElementById('upcomingList');
+            const previousDiv = document.getElementById('previousList');
+
+            if (!studentId) {
+                upcomingDiv.innerText = "You're not logged in. Please log in again.";
+                previousDiv.innerText = "";
+                return;
+            }
+
+            try {
+                const res = await fetch(`/api/exam/my-exams-detailed/${studentId}`);
+                const data = await res.json();
+
+                upcomingDiv.innerHTML = '';
+                if (data.upcoming.length === 0) {
+                    upcomingDiv.innerText = "No upcoming exams.";
+                } else {
+                    data.upcoming.forEach(exam => upcomingDiv.appendChild(buildExamCard(exam, false)));
+                }
+
+                previousDiv.innerHTML = '';
+                if (data.previous.length === 0) {
+                    previousDiv.innerText = "No previous exams.";
+                } else {
+                    data.previous.forEach(exam => previousDiv.appendChild(buildExamCard(exam, true)));
+                }
+            } catch (err) {
+                upcomingDiv.innerText = "Failed to load exams.";
+            }
+        }
+
+        function startExam(examId) {
+            // Identity verification (passport upload + live camera check) now
+            // happens on verify.html, which creates the exam session itself
+            // once the student passes. No need to call start-session here.
+            window.location.href = `/verify?exam_id=${examId}`;
+        }
+
+        loadExams();
+    </script>
+</body>
+</html>

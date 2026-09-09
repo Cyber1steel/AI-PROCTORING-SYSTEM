@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Register</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Piazzolla:ital,wght@0,500;0,600&family=Archivo:wght@400;500;600&family=Fragment+Mono&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/register.css') }}">
+</head>
+<body>
+    <div class="login-container">
+        <p class="eyebrow">Student access</p>
+        <h2>Create account</h2>
+        <form id="registerForm">
+            <div class="field">
+                <label for="name">Full name</label>
+                <input type="text" id="name" placeholder="Jordan Ade" required>
+            </div>
+            <div class="field">
+                <label for="email">Email</label>
+                <input type="email" id="email" placeholder="name@university.edu" required>
+            </div>
+            <div class="field">
+                <label for="password">Password</label>
+                <input type="password" id="password" placeholder="••••••••" required>
+            </div>
+            <div class="field">
+                <label for="idPhoto">ID / passport photo</label>
+                <input type="file" id="idPhoto" accept="image/*" required>
+                <small>This will be used to verify your identity before each exam.</small>
+            </div>
+            <button type="submit">Register</button>
+        </form>
+        <p id="errormsg" class="error-text"></p>
+        <div class="foot">
+            <span>Already have an account? <a href="/">Sign in</a></span>
+        </div>
+    </div>
+
+    <script>
+        document.getElementById("registerForm").addEventListener("submit", async (e) => {
+            e.preventDefault();
+
+            const name = document.getElementById("name").value;
+            const email = document.getElementById("email").value;
+            const password = document.getElementById("password").value;
+            const idPhotoFile = document.getElementById("idPhoto").files[0];
+            const errorMsg = document.getElementById("errormsg");
+
+            const formData = new FormData();
+            formData.append("name", name);
+            formData.append("email", email);
+            formData.append("password", password);
+            formData.append("id_photo", idPhotoFile);
+
+            try {
+                const res = await fetch("/api/auth/register", {
+                    method: "POST",
+                    body: formData
+                });
+                const data = await res.json();
+
+                if (!res.ok) {
+                    errorMsg.innerText = data.error || "Registration failed";
+                    return;
+                }
+
+                alert(data.message);
+                window.location.href = "/";
+            } catch (err) {
+                errorMsg.innerText = "Something went wrong. Try again.";
+            }
+        });
+    </script>
+</body>
+</html>

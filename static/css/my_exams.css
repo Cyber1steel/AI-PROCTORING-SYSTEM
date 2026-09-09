@@ -1,0 +1,114 @@
+@import url('https://fonts.googleapis.com/css2?family=Piazzolla:ital,wght@0,500;0,600&family=Archivo:wght@400;500;600&family=Fragment+Mono&display=swap');
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    min-height: 100vh;
+    background: #E8E2D3;
+    font-family: 'Archivo', sans-serif;
+    color: #20241F;
+}
+
+.topbar {
+    background: #1D2A44;
+    padding: 22px 32px;
+}
+
+.topbar h2 {
+    margin: 0;
+    font-family: 'Piazzolla', serif;
+    font-weight: 600;
+    font-size: 22px;
+    color: #EFEBE0;
+}
+
+.place {
+    max-width: 1000px;
+    margin: 0 auto;
+    padding: 36px 32px 60px;
+}
+
+.exam-section {
+    margin-bottom: 40px;
+}
+
+.eyebrow {
+    font-family: 'Fragment Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    color: #6B6858;
+    margin: 0 0 14px;
+}
+
+.exam-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 16px;
+}
+
+.exam-card {
+    background: #EFE9DC;
+    border-radius: 16px;
+    padding: 20px 22px;
+}
+
+.course-code {
+    font-family: 'Fragment Mono', monospace;
+    font-size: 12px;
+    color: #6B6858;
+    margin: 0 0 6px;
+}
+
+.exam-card h3 {
+    font-family: 'Piazzolla', serif;
+    font-weight: 600;
+    font-size: 18px;
+    margin: 0 0 12px;
+    color: #20241F;
+}
+
+.exam-card .meta {
+    font-size: 13px;
+    color: #6B6858;
+    margin: 0 0 4px;
+}
+
+.exam-card button {
+    width: 100%;
+    height: 42px;
+    margin-top: 14px;
+    background: #1D2A44;
+    color: #EFEBE0;
+    border: none;
+    border-radius: 10px;
+    font-family: 'Archivo', sans-serif;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.exam-card button:hover {
+    background: #26375A;
+}
+
+.status-label {
+    display: inline-block;
+    margin-top: 14px;
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.status-label.is-completed {
+    background: #EAF3DE;
+    color: #27500A;
+}
+
+.status-label.is-missed {
+    background: #FAECE7;
+    color: #712B13;
+}

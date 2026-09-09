@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Exam session</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Piazzolla:ital,wght@0,500;0,600&family=Archivo:wght@400;500;600&family=Fragment+Mono&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/index.css') }}">
+</head>
+<body>
+
+    <!-- ===== CAMERA PIP (Zoom-style) ===== -->
+    <div id="cameraPip" class="camera-pip">
+        <div class="camera-container">
+            <video id="webcam" autoplay playsinline muted></video>
+            <canvas id="canvas-overlay"></canvas>
+            <div class="pip-controls">
+                <button id="minimizeBtn" class="pip-btn" title="Minimize">–</button>
+                <button id="expandBtn" class="pip-btn" title="Expand">⤢</button>
+            </div>
+            <div id="status" class="status-bar">
+                Initializing camera…
+            </div>
+        </div>
+    </div>
+    <div id="pipBackdrop" class="pip-backdrop"></div>
+
+    <!-- ===== EXAM ===== -->
+    <main class="exam-shell">
+        <header class="exam-header">
+            <p class="eyebrow">NCAIR · Data Science Certification</p>
+            <h2>Foundations of Data Science</h2>
+            <p id="progressLabel" class="progress-label">Question 1 of 15</p>
+        </header>
+
+        <section id="questionCard" class="question-card"></section>
+
+        <div class="exam-nav">
+            <button id="prevBtn" class="nav-btn secondary">Previous</button>
+            <button id="nextBtn" class="nav-btn primary">Next</button>
+        </div>
+
+        <div id="submittedPanel" class="submitted-panel" style="display:none;">
+            <p class="eyebrow">Submitted</p>
+            <h3>Exam submitted</h3>
+            <p>This is a demo screen — no answers were sent anywhere. Wiring this to a real submit endpoint is a follow-up once the backend supports it.</p>
+        </div>
+    </main>
+
+    <!-- ================= MONITORING SCRIPT ================= -->
+    <script>
+        const video = document.getElementById('webcam');
+        const canvas = document.getElementById('canvas-overlay');
+        const ctx = canvas.getContext('2d');
+        const statusDiv = document.getElementById('status');
+
+        // Retrieve parameters and storage items
+        const urlParams = new URLSearchParams(window.location.search);
+        const examId = urlParams.get('exam_id');
+        const sessionId = localStorage.getItem('session_id');
+        const studentId = localStorage.getItem('student_id');
+
+        // SESSION GUARD: Protect against direct navigation without prior identity verification
+        if (!sessionId) {
+            alert("No active session found. Redirecting to identity verification...");
+            window.location.href = `/verify.html?exam_id=${encodeURIComponent(examId || '')}`;
+        }
+
+        window.currentStream = null;
+
+        function setStatus(text, state) {
+            // state: 'ok' | 'warn' | 'flag' | 'error'
+            statusDiv.innerHTML = `<span class="dot dot-${state}"></span>${text}`;
+        }
+
+        async function setupCamera() {
+            try {
+                window.currentStream = await navigator.mediaDevices.getUserMedia({
+                    video: { width: 640, height: 480, frameRate: { ideal: 15 } },
+                    audio: true
+                });
+
+                video.srcObject = window.currentStream;
+                await video.play();
+
+                setStatus("Camera active", "ok");
+            } catch (err) {
+                setStatus("Camera error — " + err.message, "error");
+            }
+        }
+
+        function processFrame() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            requestAnimationFrame(processFrame);
+        }
+
+        function reportClientFlag(eventType) {
+            fetch('/api/proctor/flag', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ session_id: sessionId, event_type: eventType, severity: 'high' })
+            }).catch(err => console.error("Failed to report flag:", err));
+        }
+
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                reportClientFlag('TAB_SWITCHED_OR_MINIMIZED');
+            }
+        });
+
+        function monitorCameraHealth() {
+            if (!window.currentStream) return;
+            const videoTrack = window.currentStream.getVideoTracks()[0];
+            if (!videoTrack) return;
+            videoTrack.addEventListener('ended', () => reportClientFlag('CAMERA_DISCONNECTED'));
+            videoTrack.addEventListener('mute', () => reportClientFlag('CAMERA_INTERRUPTED'));
+        }
+
+        const BUFFER_SECONDS = 8;
+        const AFTER_SECONDS = 4;
+        let rollingChunks = [];
+        let clipRecorder = null;
+
+        function startRollingBuffer() {
+            if (!window.currentStream) return;
+            clipRecorder = new MediaRecorder(window.currentStream, { mimeType: 'video/webm' });
+            clipRecorder.ondataavailable = (e) => {
+                if (e.data.size > 0) {
+                    rollingChunks.push(e.data);
+                    if (rollingChunks.length > BUFFER_SECONDS) rollingChunks.shift();
+                }
+            };
+            clipRecorder.start(1000);
+        }
+
+        async function captureIncidentClip(violationId, eventType) {
+            const beforeChunks = [...rollingChunks];
+            const afterChunks = [];
+            const captureAfter = (e) => { if (e.data.size > 0) afterChunks.push(e.data); };
+            clipRecorder.addEventListener('dataavailable', captureAfter);
+            await new Promise(resolve => setTimeout(resolve, AFTER_SECONDS * 1000));
+            clipRecorder.removeEventListener('dataavailable', captureAfter);
+            const fullClip = new Blob([...beforeChunks, ...afterChunks], { type: 'video/webm' });
+            const formData = new FormData();
+            formData.append('clip', fullClip, `violation_${violationId}.webm`);
+            try {
+                await fetch(`/api/proctor/upload-clip/${violationId}`, { method: 'POST', body: formData });
+            } catch (err) {
+                console.error("Clip upload failed:", err);
+            }
+        }
+
+        function checkLightingBackground() {
+            if (video.readyState !== 4) return;
+            const c = document.createElement('canvas');
+            c.width = video.videoWidth;
+            c.height = video.videoHeight;
+            c.getContext('2d').drawImage(video, 0, 0);
+            const dataURL = c.toDataURL('image/jpeg', 0.5);
+
+            fetch('/api/proctor/check-lighting', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ image: dataURL })
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.well_lit === false) {
+                    setStatus("Lighting is poor — move to a brighter area", "warn");
+                }
+            })
+            .catch(err => console.error("Lighting check failed:", err));
+        }
+
+        function sendFrameToServer() {
+            if (video.readyState !== 4) return;
+
+            const captureCanvas = document.createElement('canvas');
+            captureCanvas.width = video.videoWidth;
+            captureCanvas.height = video.videoHeight;
+            captureCanvas.getContext('2d').drawImage(video, 0, 0);
+            const dataURL = captureCanvas.toDataURL('image/jpeg', 0.6);
+
+            fetch('/api/proctor/scan-frame', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ session_id: sessionId, image: dataURL })
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.events_logged > 0) {
+                    setStatus(`${data.events_logged} event(s) flagged for review`, "flag");
+                    if (data.new_violations) {
+                        data.new_violations.forEach(v => captureIncidentClip(v.id, v.event_type));
+                    }
+                } else {
+                    setStatus("Monitoring active", "ok");
+                }
+            })
+            .catch(err => console.error("Frame scan failed:", err));
+        }
+
+        async function startMonitoring() {
+            setStatus("Calibrating — hold still and look at the screen", "warn");
+
+            try {
+                await fetch('/api/proctor/calibrate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ session_id: sessionId })
+                });
+            } catch (err) {
+                console.error("Calibration request failed:", err);
+            }
+
+            let calibrationComplete = false;
+            let attempts = 0;
+
+            while (!calibrationComplete && attempts < 10) {
+                await sendFrameAndCheck();
+                attempts++;
+                await new Promise(resolve => setTimeout(resolve, 500));
+            }
+
+            async function sendFrameAndCheck() {
+                if (video.readyState !== 4) return;
+
+                const captureCanvas = document.createElement('canvas');
+                captureCanvas.width = video.videoWidth;
+                captureCanvas.height = video.videoHeight;
+                captureCanvas.getContext('2d').drawImage(video, 0, 0);
+                const dataURL = captureCanvas.toDataURL('image/jpeg', 0.6);
+
+                try {
+                    const res = await fetch('/api/proctor/scan-frame', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ session_id: sessionId, image: dataURL })
+                    });
+                    const data = await res.json();
+                    if (data.baseline_ready) {
+                        calibrationComplete = true;
+                    }
+                } catch (err) {
+                    console.error("Calibration frame failed:", err);
+                }
+            }
+
+            setStatus("Monitoring active", "ok");
+            setInterval(sendFrameToServer, 3000);
+            setInterval(checkLightingBackground, 5000);
+        }
+
+        setupCamera().then(() => {
+            processFrame();
+            monitorCameraHealth();
+            startRollingBuffer();
+            startMonitoring();
+        });
+    </script>
+
+    <!-- ================= PIP UI & EXAM SCRIPT ================= -->
+    <script>
+        const cameraPip = document.getElementById('cameraPip');
+        const pipBackdrop = document.getElementById('pipBackdrop');
+        const minimizeBtn = document.getElementById('minimizeBtn');
+        const expandBtn = document.getElementById('expandBtn');
+
+        minimizeBtn.addEventListener('click', () => {
+            cameraPip.classList.toggle('minimized');
+            cameraPip.classList.remove('expanded');
+            pipBackdrop.classList.remove('active');
+        });
+
+        expandBtn.addEventListener('click', () => {
+            const isExpanded = cameraPip.classList.toggle('expanded');
+            cameraPip.classList.remove('minimized');
+            pipBackdrop.classList.toggle('active', isExpanded);
+        });
+
+        pipBackdrop.addEventListener('click', () => {
+            cameraPip.classList.remove('expanded');
+            pipBackdrop.classList.remove('active');
+        });
+
+        const questions = [
+            { q: "NITDA stands for the National Information Technology Development Agency. Which country's federal government does it operate under?", options: ["Ghana", "Nigeria", "Kenya", "South Africa"] },
+            { q: "NCAIR (National Center for Artificial Intelligence and Robotics) primarily focuses on building capacity in which fields?", options: ["Agriculture only", "AI and Robotics", "Oil and Gas", "Tourism"] },
+            { q: "In a typical data science workflow, which step usually comes immediately after data collection?", options: ["Model deployment", "Data cleaning", "Hyperparameter tuning", "Presentation"] },
+            { q: "Which of these is NOT a common data type in a pandas DataFrame column?", options: ["int64", "float64", "object", "cursor"] },
+            { q: "A confusion matrix is primarily used to evaluate which type of model?", options: ["Regression", "Classification", "Clustering", "Dimensionality reduction"] },
+            { q: "What does 'overfitting' mean in machine learning?", options: [
+                "The model performs well on new, unseen data",
+                "The model learns noise in training data and performs poorly on new data",
+                "The model is too simple to capture patterns",
+                "The model trains too quickly"
+            ] },
+            { q: "Which Python library is most associated with numerical array computation?", options: ["Flask", "NumPy", "Django", "Requests"] },
+            { q: "In statistics, what does the term 'variance' measure?", options: [
+                "The average value of a dataset",
+                "How spread out data points are from the mean",
+                "The most frequent value",
+                "The midpoint of a sorted dataset"
+            ] },
+            { q: "Which of the following best describes 'feature engineering'?", options: [
+                "Writing unit tests for a model",
+                "Creating or transforming input variables to improve model performance",
+                "Deploying a model to production",
+                "Visualizing a model's output"
+            ] },
+            { q: "A p-value below the significance threshold (commonly 0.05) typically leads a researcher to:", options: [
+                "Accept the null hypothesis fully",
+                "Reject the null hypothesis",
+                "Ignore the result",
+                "Increase the sample size automatically"
+            ] },
+            { q: "Which of these is a common technique for handling missing data?", options: ["Encryption", "Imputation", "Tokenization", "Normalization only"] },
+            { q: "In supervised learning, what is a 'label'?", options: [
+                "A random variable with no meaning",
+                "The known output/target value used to train the model",
+                "A type of neural network layer",
+                "A hyperparameter"
+            ] },
+            { q: "Which chart type is generally best for showing the relationship between two continuous variables?", options: ["Pie chart", "Scatter plot", "Bar chart", "Pictogram"] },
+            { q: "What is the main purpose of a train/test split in machine learning?", options: [
+                "To make the dataset larger",
+                "To evaluate model performance on unseen data",
+                "To speed up data collection",
+                "To remove outliers automatically"
+            ] },
+            { q: "Which of these best describes NCAIR's role relative to NITDA?", options: [
+                "A private competitor to NITDA",
+                "An initiative/center operating under Nigeria's IT development agency ecosystem",
+                "An international body unrelated to Nigeria",
+                "A university degree program"
+            ] }
+        ];
+
+        let currentQuestion = 0;
+        const questionCard = document.getElementById('questionCard');
+        const progressLabel = document.getElementById('progressLabel');
+        const prevBtn = document.getElementById('prevBtn');
+        const nextBtn = document.getElementById('nextBtn');
+        const examNav = document.querySelector('.exam-nav');
+        const submittedPanel = document.getElementById('submittedPanel');
+
+        function renderQuestion() {
+            const item = questions[currentQuestion];
+            progressLabel.innerText = `Question ${currentQuestion + 1} of ${questions.length}`;
+
+            questionCard.innerHTML = `
+                <p class="q-text">${item.q}</p>
+                <div class="options">
+                    ${item.options.map((opt, i) => `
+                        <label class="option">
+                            <input type="radio" name="q${currentQuestion}" value="${i}">
+                            <span>${opt}</span>
+                        </label>
+                    `).join('')}
+                </div>
+            `;
+
+            prevBtn.disabled = currentQuestion === 0;
+            nextBtn.innerText = currentQuestion === questions.length - 1 ? "Submit exam" : "Next";
+        }
+
+        prevBtn.addEventListener('click', () => {
+            if (currentQuestion > 0) {
+                currentQuestion--;
+                renderQuestion();
+            }
+        });
+
+        nextBtn.addEventListener('click', () => {
+            if (currentQuestion < questions.length - 1) {
+                currentQuestion++;
+                renderQuestion();
+            } else {
+                questionCard.style.display = 'none';
+                examNav.style.display = 'none';
+                progressLabel.style.display = 'none';
+                submittedPanel.style.display = 'block';
+            }
+        });
+
+        renderQuestion();
+
+    </script>
+</body>
+</html>

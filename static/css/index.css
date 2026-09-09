@@ -1,0 +1,251 @@
+@import url('https://fonts.googleapis.com/css2?family=Piazzolla:ital,wght@0,500;0,600&family=Archivo:wght@400;500;600&family=Fragment+Mono&display=swap');
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    min-height: 100vh;
+    background: #E8E2D3;
+    color: #20241F;
+    font-family: 'Archivo', sans-serif;
+}
+
+/* ===== Camera PiP ===== */
+.camera-pip {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    width: 340px;
+    z-index: 50;
+    border-radius: 16px;
+    overflow: hidden;
+    box-shadow: 0 8px 28px rgba(29,42,68,0.35);
+    transition: all 0.25s ease;
+}
+
+.camera-pip .camera-container {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 4 / 3;
+    background: #000;
+}
+
+.camera-pip #webcam {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transform: scaleX(-1);
+}
+
+.camera-pip #canvas-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+}
+
+.pip-controls {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    display: flex;
+    gap: 6px;
+}
+
+.pip-btn {
+    width: 26px;
+    height: 26px;
+    border-radius: 6px;
+    border: none;
+    background: rgba(0,0,0,0.45);
+    color: #EFEBE0;
+    font-size: 14px;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.pip-btn:hover {
+    background: rgba(0,0,0,0.65);
+}
+
+.status-bar {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    padding: 10px 14px;
+    background: linear-gradient(to top, rgba(0,0,0,0.65), transparent);
+    color: #EFEBE0;
+    font-size: 12px;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.dot-ok    { background: #6FA37E; }
+.dot-warn  { background: #C99A4B; }
+.dot-flag  { background: #D98A5A; }
+.dot-error { background: #B4472B; }
+
+/* Minimized: shrink to a small pill */
+.camera-pip.minimized {
+    width: 160px;
+}
+.camera-pip.minimized .status-bar {
+    display: none;
+}
+
+/* Expanded: ~80% of screen, centered */
+.camera-pip.expanded {
+    top: 50%;
+    left: 50%;
+    right: auto;
+    width: 80vw;
+    max-width: 1200px;
+    transform: translate(-50%, -50%);
+}
+.camera-pip.expanded .status-bar {
+    font-size: 14px;
+    padding: 14px 20px;
+}
+
+.pip-backdrop {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(29,42,68,0.55);
+    z-index: 40;
+}
+.pip-backdrop.active {
+    display: block;
+}
+
+/* ===== Exam ===== */
+.exam-shell {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 60px 24px 80px;
+}
+
+.eyebrow {
+    font-family: 'Fragment Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    color: #6B6858;
+    margin: 0 0 8px;
+}
+
+.exam-header h2 {
+    font-family: 'Piazzolla', serif;
+    font-weight: 600;
+    font-size: 26px;
+    margin: 0 0 6px;
+}
+
+.progress-label {
+    font-family: 'Fragment Mono', monospace;
+    font-size: 12px;
+    color: #6B6858;
+    margin: 0 0 28px;
+}
+
+.question-card {
+    background: #EFE9DC;
+    border-radius: 16px;
+    padding: 28px;
+    margin-bottom: 20px;
+}
+
+.q-text {
+    font-size: 16px;
+    font-weight: 500;
+    margin: 0 0 20px;
+}
+
+.options {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.option {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 14px;
+    background: #E8E2D3;
+    border-radius: 10px;
+    cursor: pointer;
+    font-size: 14px;
+}
+
+.option:has(input:checked) {
+    outline: 2px solid #1D2A44;
+}
+
+.exam-nav {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.nav-btn {
+    height: 44px;
+    padding: 0 24px;
+    border-radius: 10px;
+    border: none;
+    font-family: 'Archivo', sans-serif;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.nav-btn.primary {
+    background: #1D2A44;
+    color: #EFEBE0;
+}
+.nav-btn.primary:hover {
+    background: #26375A;
+}
+
+.nav-btn.secondary {
+    background: transparent;
+    color: #6B6858;
+    border: 1px solid #B8AF9C;
+}
+.nav-btn.secondary:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.submitted-panel {
+    background: #EFE9DC;
+    border-radius: 16px;
+    padding: 32px;
+    text-align: center;
+}
+
+.submitted-panel h3 {
+    font-family: 'Piazzolla', serif;
+    font-size: 20px;
+    margin: 4px 0 10px;
+}
+
+.submitted-panel p:last-child {
+    font-size: 14px;
+    color: #6B6858;
+    max-width: 440px;
+    margin: 0 auto;
+}

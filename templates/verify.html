@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Identity Verification</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/verify.css') }}">
+</head>
+<body>
+    <h2>Identity Verification</h2>
+
+    <div id="cameraStep">
+        <p>Please look at the camera so we can confirm it's really you before starting the exam.</p>
+        <div class="camera-container">
+            <video id="webcam" autoplay playsinline muted></video>
+        </div>
+        <div id="status" class="status-badge">Waiting to start camera...</div>
+        <button id="retryBtn" style="display:none;" onclick="retryVerification()">Try Again</button>
+    </div>
+
+    <script>
+        const studentId = localStorage.getItem('student_id');
+        const urlParams = new URLSearchParams(window.location.search);
+        const examId = urlParams.get('exam_id');
+
+        const statusDiv = document.getElementById('status');
+        const retryBtn = document.getElementById('retryBtn');
+        const video = document.getElementById('webcam');
+
+        const MAX_FAILURES = 3;
+        let failureCount = 0;
+        let sessionId = null;
+        let currentStream = null;
+
+        if (!examId) {
+            statusDiv.innerText = "Missing exam information. Please go back and select an exam.";
+            statusDiv.style.color = "#f87171";
+        } else {
+            beginLiveVerification();
+        }
+
+        async function beginLiveVerification() {
+            statusDiv.innerText = "Starting session...";
+            statusDiv.style.color = "#facc15";
+
+            if (!sessionId) {
+                try {
+                    const res = await fetch('/api/exam/start-session', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ exam_id: examId, student_id: studentId })
+                    });
+                    const data = await res.json();
+                    sessionId = data.session_id;
+                    localStorage.setItem('session_id', sessionId);
+                } catch (err) {
+                    statusDiv.innerText = "Could not start exam session. Please try again.";
+                    statusDiv.style.color = "#f87171";
+                    return;
+                }
+            }
+
+            try {
+                currentStream = await navigator.mediaDevices.getUserMedia({
+                    video: { width: 640, height: 480, frameRate: { ideal: 15 } }
+                });
+                video.srcObject = currentStream;
+                await video.play();
+            } catch (err) {
+                statusDiv.innerText = "Camera error: " + err.message;
+                statusDiv.style.color = "#f87171";
+                return;
+            }
+
+            statusDiv.innerText = "Verifying your identity... look at the camera";
+            statusDiv.style.color = "#facc15";
+
+            let attempts = 0;
+            while (attempts < 20) {
+                const result = await captureAndVerifyFrame();
+
+                if (result.status === 'not_enrolled') {
+                    statusDiv.innerText = "No reference photo found on your account. Please contact your administrator.";
+                    statusDiv.style.color = "#f87171";
+                    stopCamera();
+                    return;
+                }
+
+                if (result.status === 'done') {
+                    stopCamera();
+                    if (result.passed) {
+                        statusDiv.innerText = "Identity verified. Redirecting to your exam...";
+                        statusDiv.style.color = "#4ade80";
+                        // REDIRECT UPDATED: Passes exam_id to the exam session page
+                        setTimeout(() => { 
+                            window.location.href = `/index.html?exam_id=${encodeURIComponent(examId)}`; 
+                        }, 1000);
+                    } else {
+                        handleVerificationFailure();
+                    }
+                    return;
+                }
+
+                attempts++;
+                await new Promise(resolve => setTimeout(resolve, 400));
+            }
+
+            stopCamera();
+            statusDiv.innerText = "Verification timed out.";
+            statusDiv.style.color = "#f87171";
+            retryBtn.style.display = "inline-block";
+        }
+
+        async function captureAndVerifyFrame() {
+            const captureCanvas = document.createElement('canvas');
+            captureCanvas.width = video.videoWidth;
+            captureCanvas.height = video.videoHeight;
+            captureCanvas.getContext('2d').drawImage(video, 0, 0);
+            const dataURL = captureCanvas.toDataURL('image/jpeg', 0.7);
+
+            const res = await fetch('/api/proctor/verify-identity', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ session_id: sessionId, student_id: studentId, image: dataURL })
+            });
+            return await res.json();
+        }
+
+        function handleVerificationFailure() {
+            failureCount++;
+
+            fetch('/api/proctor/flag', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    session_id: sessionId,
+                    event_type: 'IDENTITY_VERIFICATION_FAILED',
+                    severity: 'high'
+                })
+            }).catch(err => console.error("Failed to report flag:", err));
+
+            if (failureCount >= MAX_FAILURES) {
+                statusDiv.innerText = "Identity verification failed. Your administrator has been notified — please contact them to proceed.";
+                statusDiv.style.color = "#f87171";
+                retryBtn.style.display = "none";
+            } else {
+                statusDiv.innerText = `Identity could not be confirmed (attempt ${failureCount}/${MAX_FAILURES}).`;
+                statusDiv.style.color = "#f87171";
+                retryBtn.style.display = "inline-block";
+            }
+        }
+
+        function retryVerification() {
+            retryBtn.style.display = "none";
+            beginLiveVerification();
+        }
+
+        function stopCamera() {
+            if (currentStream) {
+                currentStream.getTracks().forEach(track => track.stop());
+                currentStream = null;
+            }
+        }
+    </script>
+</body>
+</html>
