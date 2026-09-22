@@ -49,6 +49,8 @@
         </div>
     </main>
 
+    <script src="{{ url_for('static', filename='js/exam-recording.js') }}"></script>
+
     <!-- ================= MONITORING SCRIPT ================= -->
     <script>
         const video = document.getElementById('webcam');
@@ -118,31 +120,39 @@
             videoTrack.addEventListener('mute', () => reportClientFlag('CAMERA_INTERRUPTED'));
         }
 
-        const BUFFER_SECONDS = 8;
+        const BUFFER_SECONDS = 10000;
         const AFTER_SECONDS = 4;
-        let rollingChunks = [];
-        let clipRecorder = null;
+        const recordingManager = new window.ExamRecordingManager({
+            windowMs: BUFFER_SECONDS,
+            timesliceMs: 1000,
+            onError: (label, error) => {
+                console.error(label, error);
+                setStatus(label + ' — ' + (error && error.message ? error.message : String(error)), 'error');
+            }
+        });
 
         function startRollingBuffer() {
             if (!window.currentStream) return;
-            clipRecorder = new MediaRecorder(window.currentStream, { mimeType: 'video/webm' });
-            clipRecorder.ondataavailable = (e) => {
-                if (e.data.size > 0) {
-                    rollingChunks.push(e.data);
-                    if (rollingChunks.length > BUFFER_SECONDS) rollingChunks.shift();
-                }
-            };
-            clipRecorder.start(1000);
+
+            try {
+                recordingManager.initializeFromStream(window.currentStream);
+                recordingManager.start();
+            } catch (err) {
+                console.error('Recording initialization failed:', err);
+                setStatus('Recording unavailable — ' + err.message, 'error');
+            }
+        }
+
+        function getRecentRecordingWindow(windowMs = BUFFER_SECONDS) {
+            return recordingManager.getRecentChunks(windowMs);
         }
 
         async function captureIncidentClip(violationId, eventType) {
-            const beforeChunks = [...rollingChunks];
-            const afterChunks = [];
-            const captureAfter = (e) => { if (e.data.size > 0) afterChunks.push(e.data); };
-            clipRecorder.addEventListener('dataavailable', captureAfter);
-            await new Promise(resolve => setTimeout(resolve, AFTER_SECONDS * 1000));
-            clipRecorder.removeEventListener('dataavailable', captureAfter);
-            const fullClip = new Blob([...beforeChunks, ...afterChunks], { type: 'video/webm' });
+            const recentChunks = getRecentRecordingWindow(BUFFER_SECONDS);
+            if (!recentChunks.length) return;
+
+            const clipType = recentChunks[0].mimeType || 'video/webm';
+            const fullClip = new Blob(recentChunks.map(chunk => chunk.blob), { type: clipType });
             const formData = new FormData();
             formData.append('clip', fullClip, `violation_${violationId}.webm`);
             try {
