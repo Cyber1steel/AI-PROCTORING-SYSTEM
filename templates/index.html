@@ -50,6 +50,7 @@
     </main>
 
     <script src="{{ url_for('static', filename='js/exam-recording.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/incident-clip-engine.js') }}"></script>
 
     <!-- ================= MONITORING SCRIPT ================= -->
     <script>
@@ -131,6 +132,58 @@
             }
         });
 
+        const incidentClipEngine = new window.IncidentClipEngine({
+            recordingManager,
+            preEventMs: 10000,
+            postEventMs: 5000,
+            onIncidentReady: async (incident) => {
+                console.info('Incident clip ready:', incident);
+                window.lastIncidentClip = incident;
+                await uploadIncidentClip(incident);
+            },
+            onError: (label, error) => {
+                console.error(label, error);
+            }
+        });
+
+        async function uploadIncidentClip(incident) {
+            if (!incident || !incident.blob || !incident.violationId) {
+                console.warn('No incident clip payload available to upload.');
+                return null;
+            }
+
+            const formData = new FormData();
+            const mimeType = incident.mimeType || 'video/webm';
+            const extension = mimeType.includes('mp4') ? '.mp4' : '.webm';
+            const filename = `violation_${incident.violationId}_${Date.now()}${extension}`;
+
+            formData.append('clip', incident.blob, filename);
+            formData.append('mime_type', mimeType);
+            formData.append('event_elapsed_ms', String(incident.eventElapsedMs || 0));
+            formData.append('clip_start_elapsed_ms', String(incident.clipStartElapsedMs || 0));
+            formData.append('clip_end_elapsed_ms', String(incident.clipEndElapsedMs || 0));
+
+            try {
+                const response = await fetch(`/api/proctor/upload-clip/${encodeURIComponent(incident.violationId)}`, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const payload = await response.json().catch(() => ({}));
+                if (!response.ok) {
+                    throw new Error(payload && payload.error ? payload.error : 'Incident clip upload failed.');
+                }
+
+                setStatus('Incident clip uploaded for review', 'ok');
+                console.info('Incident clip uploaded:', payload);
+                return payload;
+            } catch (error) {
+                console.error('Incident clip upload failed:', error);
+                setStatus('Incident clip upload failed — check server logs', 'error');
+                return null;
+            }
+        }
+
         function startRollingBuffer() {
             if (!window.currentStream) return;
 
@@ -147,19 +200,13 @@
             return recordingManager.getRecentChunks(windowMs);
         }
 
-        async function captureIncidentClip(violationId, eventType) {
-            const recentChunks = getRecentRecordingWindow(BUFFER_SECONDS);
-            if (!recentChunks.length) return;
-
-            const clipType = recentChunks[0].mimeType || 'video/webm';
-            const fullClip = new Blob(recentChunks.map(chunk => chunk.blob), { type: clipType });
-            const formData = new FormData();
-            formData.append('clip', fullClip, `violation_${violationId}.webm`);
-            try {
-                await fetch(`/api/proctor/upload-clip/${violationId}`, { method: 'POST', body: formData });
-            } catch (err) {
-                console.error("Clip upload failed:", err);
-            }
+        function captureIncidentClip(violationId, eventType) {
+            if (!window.IncidentClipEngine) return null;
+            return incidentClipEngine.handleViolation({
+                id: violationId,
+                event_type: eventType,
+                eventElapsedMs: recordingManager.getCurrentElapsedMs()
+            });
         }
 
         function checkLightingBackground() {

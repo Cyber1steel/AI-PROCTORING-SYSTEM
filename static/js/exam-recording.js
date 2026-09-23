@@ -223,6 +223,14 @@
             return this.buffer.getChunksForWindow(startElapsedMs, endElapsedMs);
         }
 
+        getCurrentElapsedMs() {
+            if (!this.recordingStartTs) {
+                return this.lastChunkEndElapsedMs || 0;
+            }
+
+            return Math.max(this.lastChunkEndElapsedMs, performance.now() - this.recordingStartTs);
+        }
+
         getRecentChunks(windowMs = this.windowMs) {
             return this.buffer.getRecentChunks(windowMs);
         }

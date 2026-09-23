@@ -68,6 +68,10 @@ def webcam_demo():
 def verify_page():
     return render_template('verify.html')
 
+@app.route('/recording-test')
+def recording_test_page():
+    return render_template('recording-test.html')
+
 
 if __name__ == "__main__":
     with app.app_context():

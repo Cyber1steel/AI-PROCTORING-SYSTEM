@@ -2,6 +2,8 @@ import cv2
 import numpy as np
 import base64
 import os
+import json
+import uuid
 from datetime import datetime
 from flask import Blueprint, request, jsonify
 from models import db, Violation, ExamSession
@@ -169,16 +171,73 @@ def upload_clip(violation_id):
         return jsonify({"error": "No clip file provided"}), 400
 
     clip_file = request.files['clip']
-    filename = secure_filename(f"violation_{violation_id}_{violation.event_type}.webm")
-    save_path = os.path.join("static", "violation_clips", filename)
+    if not clip_file or clip_file.filename == '':
+        return jsonify({"error": "No clip file selected"}), 400
 
-    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    clip_bytes = clip_file.read()
+    if len(clip_bytes) == 0:
+        return jsonify({"error": "The uploaded clip is empty"}), 400
+
+    mime_type = (request.form.get('mime_type') or clip_file.mimetype or 'video/webm').lower()
+    if not mime_type.startswith('video/') and mime_type != 'application/octet-stream':
+        return jsonify({"error": "Unsupported clip MIME type"}), 400
+
+    safe_event_name = secure_filename((violation.event_type or 'incident').replace(' ', '_')) or 'incident'
+    requested_name = secure_filename(clip_file.filename)
+    requested_ext = os.path.splitext(requested_name)[1].lower()
+
+    if requested_ext in {'.webm', '.mp4'}:
+        extension = requested_ext
+    elif 'mp4' in mime_type:
+        extension = '.mp4'
+    else:
+        extension = '.webm'
+
+    unique_suffix = uuid.uuid4().hex[:8]
+    filename = f"violation_{violation_id}_{safe_event_name}_{unique_suffix}{extension}"
+    save_dir = os.path.join("static", "violation_clips")
+    os.makedirs(save_dir, exist_ok=True)
+
+    save_path = os.path.join(save_dir, filename)
+    clip_file.stream.seek(0)
     clip_file.save(save_path)
 
-    violation.clip_path = save_path
+    if not os.path.exists(save_path) or os.path.getsize(save_path) == 0:
+        return jsonify({"error": "Clip upload failed during storage"}), 500
+
+    rel_path = save_path.replace('\\', '/')
+    violation.clip_path = rel_path
+
+    event_elapsed_ms = request.form.get('event_elapsed_ms')
+    clip_start_elapsed_ms = request.form.get('clip_start_elapsed_ms')
+    clip_end_elapsed_ms = request.form.get('clip_end_elapsed_ms')
+
+    metadata = {
+        "violation_id": violation_id,
+        "event_type": violation.event_type,
+        "event_elapsed_ms": int(float(event_elapsed_ms)) if event_elapsed_ms not in (None, '') else None,
+        "clip_start_elapsed_ms": int(float(clip_start_elapsed_ms)) if clip_start_elapsed_ms not in (None, '') else None,
+        "clip_end_elapsed_ms": int(float(clip_end_elapsed_ms)) if clip_end_elapsed_ms not in (None, '') else None,
+        "mime_type": mime_type,
+        "created_at": datetime.utcnow().isoformat() + 'Z'
+    }
+
+    metadata_path = save_path + '.json'
+    with open(metadata_path, 'w', encoding='utf-8') as metadata_file:
+        json.dump(metadata, metadata_file)
+
     db.session.commit()
 
-    return jsonify({"status": "success", "clip_path": save_path})
+    return jsonify({
+        "status": "success",
+        "violation_id": violation.id,
+        "clip_path": rel_path,
+        "mime_type": mime_type,
+        "event_elapsed_ms": metadata["event_elapsed_ms"],
+        "clip_start_elapsed_ms": metadata["clip_start_elapsed_ms"],
+        "clip_end_elapsed_ms": metadata["clip_end_elapsed_ms"],
+        "metadata_path": metadata_path.replace('\\', '/')
+    })
 
 
 

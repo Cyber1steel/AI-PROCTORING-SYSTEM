@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Recording Verification Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 24px;
+            background: #111827;
+            color: #f3f4f6;
+        }
+
+        .panel {
+            max-width: 960px;
+            margin: 0 auto;
+            background: #1f2937;
+            border: 1px solid #374151;
+            border-radius: 12px;
+            padding: 24px;
+        }
+
+        .controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            margin: 16px 0;
+        }
+
+        button {
+            padding: 10px 16px;
+            border-radius: 8px;
+            border: none;
+            font-weight: 600;
+            cursor: pointer;
+            background: #2563eb;
+            color: white;
+        }
+
+        button.secondary {
+            background: #374151;
+        }
+
+        button:disabled {
+            opacity: 0.45;
+            cursor: not-allowed;
+        }
+
+        video {
+            width: 100%;
+            max-width: 720px;
+            background: #000;
+            border-radius: 10px;
+            border: 1px solid #374151;
+        }
+
+        .status {
+            margin: 16px 0;
+            padding: 12px;
+            border-radius: 8px;
+            background: #0f172a;
+            border: 1px solid #334155;
+            line-height: 1.5;
+            white-space: pre-wrap;
+        }
+
+        .info-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 12px;
+            margin-top: 16px;
+        }
+
+        .info-box {
+            padding: 12px;
+            border-radius: 8px;
+            background: #0f172a;
+            border: 1px solid #334155;
+        }
+
+        .label {
+            color: #93c5fd;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            display: block;
+            margin-bottom: 6px;
+        }
+    </style>
+</head>
+<body>
+    <div class="panel">
+        <h2>Recording Verification Test</h2>
+        <p>Uses the repository’s existing Team 2 recording manager to verify real camera + microphone capture, MediaRecorder output, and playback.</p>
+
+        <div class="controls">
+            <button id="startCameraBtn">Start Camera</button>
+            <button id="startRecordBtn" class="secondary" disabled>Start Recording</button>
+            <button id="stopRecordBtn" class="secondary" disabled>Stop Recording</button>
+            <button id="playBtn" class="secondary" disabled>Play Recording</button>
+            <button id="downloadBtn" class="secondary" disabled>Download Recording</button>
+        </div>
+
+        <div class="status" id="statusBox">
+Camera: Not connected
+Microphone: Not connected
+Recording: Not started
+    </div>
+
+        <video id="liveVideo" autoplay playsinline muted></video>
+
+        <div class="info-grid">
+            <div class="info-box">
+                <span class="label">Video tracks</span>
+                <div id="videoTrackInfo">0</div>
+            </div>
+            <div class="info-box">
+                <span class="label">Audio tracks</span>
+                <div id="audioTrackInfo">0</div>
+            </div>
+            <div class="info-box">
+                <span class="label">MIME type</span>
+                <div id="mimeInfo">Not available</div>
+            </div>
+            <div class="info-box">
+                <span class="label">Duration</span>
+                <div id="durationInfo">0.00 s</div>
+            </div>
+            <div class="info-box">
+                <span class="label">File size</span>
+                <div id="sizeInfo">0 bytes</div>
+            </div>
+        </div>
+
+        <h3>Recorded playback</h3>
+        <video id="playbackVideo" controls playsinline></video>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/exam-recording.js') }}"></script>
+    <script>
+        const statusBox = document.getElementById('statusBox');
+        const startCameraBtn = document.getElementById('startCameraBtn');
+        const startRecordBtn = document.getElementById('startRecordBtn');
+        const stopRecordBtn = document.getElementById('stopRecordBtn');
+        const playBtn = document.getElementById('playBtn');
+        const downloadBtn = document.getElementById('downloadBtn');
+        const liveVideo = document.getElementById('liveVideo');
+        const playbackVideo = document.getElementById('playbackVideo');
+        const videoTrackInfo = document.getElementById('videoTrackInfo');
+        const audioTrackInfo = document.getElementById('audioTrackInfo');
+        const mimeInfo = document.getElementById('mimeInfo');
+        const durationInfo = document.getElementById('durationInfo');
+        const sizeInfo = document.getElementById('sizeInfo');
+
+        let activeStream = null;
+        let recordingManager = null;
+        let recordedBlob = null;
+        let objectUrl = null;
+        let manualRecordingChunks = [];
+        let finalizingRecording = false;
+
+        function setStatus(text) {
+            statusBox.textContent = text;
+        }
+
+        function updateTrackInfo() {
+            const videoTracks = activeStream ? activeStream.getVideoTracks() : [];
+            const audioTracks = activeStream ? activeStream.getAudioTracks() : [];
+            videoTrackInfo.textContent = String(videoTracks.length);
+            audioTrackInfo.textContent = String(audioTracks.length);
+        }
+
+        function updateMetadata() {
+            if (!recordedBlob) {
+                mimeInfo.textContent = 'Not available';
+                durationInfo.textContent = '0.00 s';
+                sizeInfo.textContent = '0 bytes';
+                return;
+            }
+
+            mimeInfo.textContent = recordedBlob.type || 'video/webm';
+            sizeInfo.textContent = `${recordedBlob.size} bytes`;
+            const duration = playbackVideo.duration && Number.isFinite(playbackVideo.duration) ? playbackVideo.duration : 0;
+            durationInfo.textContent = `${duration.toFixed(2)} s`;
+        }
+
+        async function startCamera() {
+            try {
+                activeStream = await navigator.mediaDevices.getUserMedia({
+                    video: true,
+                    audio: true
+                });
+
+                liveVideo.srcObject = activeStream;
+                await liveVideo.play();
+                updateTrackInfo();
+
+                recordingManager = new window.ExamRecordingManager({
+                    windowMs: 10000,
+                    timesliceMs: 500,
+                    onError: (label, error) => {
+                        console.error(label, error);
+                        setStatus(`${label}: ${error && error.message ? error.message : String(error)}`);
+                    }
+                });
+
+                recordingManager.initializeFromStream(activeStream);
+                const recorder = recordingManager.recorder;
+                const originalOnDataAvailable = recorder && recorder.ondataavailable ? recorder.ondataavailable : null;
+                const originalOnStop = recorder && recorder.onstop ? recorder.onstop : null;
+
+                recorder.ondataavailable = (event) => {
+                    if (event && event.data && event.data.size > 0) {
+                        manualRecordingChunks.push(event.data);
+                    }
+
+                    if (originalOnDataAvailable) {
+                        originalOnDataAvailable.call(recorder, event);
+                    }
+                };
+
+                recorder.onstop = () => {
+                    if (typeof originalOnStop === 'function') {
+                        originalOnStop.call(recorder);
+                    }
+
+                    if (finalizingRecording) {
+                        return;
+                    }
+
+                    finalizingRecording = true;
+                    const mimeType = recorder.mimeType || recordingManager.mimeType || 'video/webm';
+                    const fullBlob = manualRecordingChunks.length ? new Blob(manualRecordingChunks, { type: mimeType }) : null;
+
+                    recordedBlob = fullBlob;
+
+                    if (objectUrl) {
+                        URL.revokeObjectURL(objectUrl);
+                    }
+
+                    if (!fullBlob || fullBlob.size === 0) {
+                        setStatus('Camera: Connected\nMicrophone: Connected\nRecording: Failed to finalize');
+                        finalizingRecording = false;
+                        return;
+                    }
+
+                    objectUrl = URL.createObjectURL(fullBlob);
+                    playbackVideo.src = objectUrl;
+                    playbackVideo.onloadedmetadata = () => {
+                        updateMetadata();
+                        setStatus(`Camera: Connected\nMicrophone: Connected\nRecording: COMPLETE\nDuration: ${(playbackVideo.duration || 0).toFixed(2)} s\nFile size: ${fullBlob.size} bytes\nMIME type: ${fullBlob.type || 'video/webm'}`);
+                    };
+                    playbackVideo.load();
+                    updateMetadata();
+
+                    startRecordBtn.disabled = true;
+                    stopRecordBtn.disabled = true;
+                    playBtn.disabled = false;
+                    downloadBtn.disabled = false;
+                    finalizingRecording = false;
+                };
+
+                mimeInfo.textContent = recordingManager.mimeType || recordingManager.getSupportedMimeType() || 'Not available';
+
+                startCameraBtn.disabled = true;
+                startRecordBtn.disabled = false;
+                stopRecordBtn.disabled = true;
+                setStatus('Camera: Connected\nMicrophone: Connected\nRecording: Ready');
+            } catch (error) {
+                console.error(error);
+                setStatus(`Camera startup failed: ${error && error.message ? error.message : String(error)}`);
+            }
+        }
+
+        function startRecording() {
+            if (!recordingManager) {
+                setStatus('No recording manager initialized.');
+                return;
+            }
+
+            finalizingRecording = false;
+            manualRecordingChunks = [];
+            recordedBlob = null;
+            if (objectUrl) {
+                URL.revokeObjectURL(objectUrl);
+                objectUrl = null;
+            }
+            playbackVideo.src = '';
+            playbackVideo.load();
+
+            const started = recordingManager.start();
+            if (!started) {
+                setStatus('Recording could not be started.');
+                return;
+            }
+
+            startRecordBtn.disabled = true;
+            stopRecordBtn.disabled = false;
+            playBtn.disabled = true;
+            downloadBtn.disabled = true;
+            setStatus('Camera: Connected\nMicrophone: Connected\nRecording: ACTIVE');
+        }
+
+        function stopRecording() {
+            if (!recordingManager) {
+                setStatus('No recording manager available.');
+                return;
+            }
+
+            const recorder = recordingManager.recorder;
+            if (!recorder) {
+                setStatus('Camera: Connected\nMicrophone: Connected\nRecording: Failed to finalize');
+                return;
+            }
+
+            startRecordBtn.disabled = true;
+            stopRecordBtn.disabled = true;
+            setStatus('Camera: Connected\nMicrophone: Connected\nRecording: Finalizing…');
+
+            try {
+                recorder.stop();
+            } catch (error) {
+                console.error('Failed to stop MediaRecorder', error);
+                setStatus(`Recording stopped with error: ${error && error.message ? error.message : String(error)}`);
+            }
+        }
+
+        function playRecording() {
+            if (!objectUrl) {
+                setStatus('No recording available to play.');
+                return;
+            }
+
+            playbackVideo.src = objectUrl;
+            playbackVideo.play();
+        }
+
+        function downloadRecording() {
+            if (!objectUrl || !recordedBlob) {
+                setStatus('No recording available to download.');
+                return;
+            }
+
+            const a = document.createElement('a');
+            a.href = objectUrl;
+            a.download = `manual-recording-${Date.now()}.webm`;
+            a.click();
+        }
+
+        startCameraBtn.addEventListener('click', startCamera);
+        startRecordBtn.addEventListener('click', startRecording);
+        stopRecordBtn.addEventListener('click', stopRecording);
+        playBtn.addEventListener('click', playRecording);
+        downloadBtn.addEventListener('click', downloadRecording);
+
+        window.addEventListener('beforeunload', () => {
+            if (activeStream) {
+                activeStream.getTracks().forEach((track) => track.stop());
+            }
+            if (objectUrl) {
+                URL.revokeObjectURL(objectUrl);
+            }
+        });
+    </script>
+</body>
+</html>
