@@ -7,6 +7,7 @@ import uuid
 from datetime import datetime
 from flask import Blueprint, request, jsonify
 from models import db, Violation, ExamSession
+from timing_utils import normalize_incident_timing_metadata
 from detection.engine import ProctoringEngine
 from werkzeug.utils import secure_filename
 from detection.face_detection import detect_faces
@@ -212,12 +213,22 @@ def upload_clip(violation_id):
     clip_start_elapsed_ms = request.form.get('clip_start_elapsed_ms')
     clip_end_elapsed_ms = request.form.get('clip_end_elapsed_ms')
 
+    try:
+        timing = normalize_incident_timing_metadata(
+            event_elapsed_ms=event_elapsed_ms,
+            clip_start_elapsed_ms=clip_start_elapsed_ms,
+            clip_end_elapsed_ms=clip_end_elapsed_ms,
+        )
+    except ValueError as exc:
+        return jsonify({"error": f"Invalid incident timing metadata: {exc}"}), 400
+
     metadata = {
         "violation_id": violation_id,
         "event_type": violation.event_type,
-        "event_elapsed_ms": int(float(event_elapsed_ms)) if event_elapsed_ms not in (None, '') else None,
-        "clip_start_elapsed_ms": int(float(clip_start_elapsed_ms)) if clip_start_elapsed_ms not in (None, '') else None,
-        "clip_end_elapsed_ms": int(float(clip_end_elapsed_ms)) if clip_end_elapsed_ms not in (None, '') else None,
+        "event_elapsed_ms": timing["event_elapsed_ms"],
+        "clip_start_elapsed_ms": timing["clip_start_elapsed_ms"],
+        "clip_end_elapsed_ms": timing["clip_end_elapsed_ms"],
+        "video_offset_ms": timing["video_offset_ms"],
         "mime_type": mime_type,
         "created_at": datetime.utcnow().isoformat() + 'Z'
     }
@@ -236,6 +247,7 @@ def upload_clip(violation_id):
         "event_elapsed_ms": metadata["event_elapsed_ms"],
         "clip_start_elapsed_ms": metadata["clip_start_elapsed_ms"],
         "clip_end_elapsed_ms": metadata["clip_end_elapsed_ms"],
+        "video_offset_ms": metadata["video_offset_ms"],
         "metadata_path": metadata_path.replace('\\', '/')
     })
 
