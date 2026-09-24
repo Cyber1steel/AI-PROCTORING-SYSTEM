@@ -1,3 +1,4 @@
+import json
 from flask import Blueprint, request, jsonify
 from datetime import datetime
 from models import db, Exam, ExamEnrollment, ExamSession, Violation, User
@@ -88,13 +89,31 @@ def admin_sessions():
 def admin_session_violations(session_id):
     violations = Violation.query.filter_by(session_id=session_id).order_by(Violation.timestamp).all()
 
-    return jsonify([{
-        "event_type": v.event_type,
-        "severity": v.severity,
-        "confidence": v.confidence,
-        "timestamp": v.timestamp.strftime("%H:%M:%S"),
-        "snapshot_url": f"{request.host_url.rstrip('/')}/{v.snapshot_path}" if v.snapshot_path else None
-    } for v in violations])
+    result = []
+    for v in violations:
+        metadata = {}
+        if v.clip_path:
+            metadata_path = f"{v.clip_path}.json"
+            try:
+                with open(metadata_path, 'r', encoding='utf-8') as metadata_file:
+                    metadata = json.load(metadata_file)
+            except (FileNotFoundError, json.JSONDecodeError, OSError):
+                metadata = {}
+
+        result.append({
+            "event_type": v.event_type,
+            "severity": v.severity,
+            "confidence": v.confidence,
+            "timestamp": v.timestamp.strftime("%H:%M:%S"),
+            "snapshot_url": f"{request.host_url.rstrip('/')}/{v.snapshot_path}" if v.snapshot_path else None,
+            "clip_url": f"{request.host_url.rstrip('/')}/{v.clip_path}" if v.clip_path else None,
+            "event_elapsed_ms": metadata.get('event_elapsed_ms'),
+            "clip_start_elapsed_ms": metadata.get('clip_start_elapsed_ms'),
+            "clip_end_elapsed_ms": metadata.get('clip_end_elapsed_ms'),
+            "video_offset_ms": metadata.get('video_offset_ms'),
+        })
+
+    return jsonify(result)
 
 
 
