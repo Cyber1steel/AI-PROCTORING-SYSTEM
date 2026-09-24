@@ -9,11 +9,9 @@ This component builds the incident/clip layer on top of Philip Abbah’s recordi
 Exact files changed for this role:
 
 - `static/js/incident-clip-engine.js`
-  - Added the incident engine state machine, violation handling, pre/post-event timing, chunk selection, Blob assembly, and duplicate protection.
-- `templates/index.html`
-  - Hooked the incident engine into the existing violation flow and passed the live recording elapsed time into the incident handoff.
+  - Preserves pre-event chunks immediately when a violation occurs; merges preserved pre-event chunks with post-event chunks at finalization; avoids duplicate chunk inclusion and preserves chronological ordering.
 - `docs/team2-anosi-incident-engine.md`
-  - Documented the final incident engine behavior and integration contract.
+  - Updated documentation to reflect the final implementation and behavior.
 
 ## Architecture
 
@@ -31,7 +29,7 @@ Existing violation event
 - READY
 - FINALIZE (handled internally by the timeout boundary)
 
-When a violation is received, the engine looks at the current recording timeline and creates an incident window beginning roughly 10 seconds before the violation and ending roughly 5 seconds after it.
+When a violation is received, the engine looks at the current recording timeline and creates an incident window beginning roughly 10 seconds before the violation and ending roughly 5 seconds after it. Critically, the engine now immediately preserves the pre-event chunks that cover the pre-event window so that rolling-buffer eviction cannot discard them while the engine waits for the post-event period to finish.
 
 ## How it uses Philip’s work
 
@@ -52,22 +50,22 @@ This preserves Philip’s architecture and avoids creating a second recording pi
 
 When a violation occurs, the engine computes:
 
-- eventElapsedMs
-- clipStartElapsedMs = max(0, eventElapsedMs - 10000)
+- `eventElapsedMs`
+- `clipStartElapsedMs = max(0, eventElapsedMs - 10000)`
 
-Then it fetches the windows from the rolling buffer using the true chunk timing metadata instead of assuming a fixed timeslice.
+Then it immediately fetches the chunks that currently cover that pre-event window from the recording manager and stores those chunk references in the incident state as `preservedPreChunks`. These preserved references are kept separately from the recording manager's rolling buffer so they cannot be lost when the buffer prunes older chunks.
 
 ## Post-event logic
 
 After the violation event, the engine keeps the incident active until the target end boundary is reached:
 
-- clipEndElapsedMs = eventElapsedMs + 5000
+- `clipEndElapsedMs = eventElapsedMs + 5000`
 
-The engine waits asynchronously for that boundary rather than blocking the main exam loop.
+While waiting, new chunks continue to arrive into the recording manager's rolling buffer. When finalization is triggered the engine requests only the remaining post-event chunks (starting at the end of the preserved pre-event window) and then merges them with the preserved pre-event chunks. Merge logic deduplicates overlapping chunks by comparing `startElapsedMs` and `endElapsedMs` and preserves chronological ordering.
 
 ## Multiple violations
 
-If another violation occurs while the current incident is still active, the engine extends the active incident window instead of creating a second overlapping clip. It keeps the latest relevant end boundary.
+If another violation occurs while the current incident is still active, the engine extends the active incident window instead of creating a second overlapping clip. If the extension requires an earlier `clipStartElapsedMs`, the engine immediately fetches any additional earlier pre-event chunks and merges them into the incident's `preservedPreChunks` (avoiding duplicates). The preserved pre-event footage collected at any earlier point is never discarded by the rolling buffer because the engine keeps its own references.
 
 ## Duplicate protection
 
@@ -91,21 +89,23 @@ This is a clean handoff object for Victor’s upload/storage layer.
 ## Edge cases handled
 
 - early violation before 10 seconds of footage exists
-- no chunks available
+- no chunks available for either pre/post windows
 - recorder unexpectedly stopping
-- exam ending while an incident is active
-- multiple violations close together
+- exam ending while an incident is active (preserved pre-event chunks remain held by the incident state)
+- multiple violations close together (merged into single incident when applicable)
 - duplicate violation events
 
 ## Testing
 
-The following checks were performed:
+What was validated:
 
-- fresh code inspection of the existing recording and violation flow
-- syntax validation of the JavaScript files
-- verification that the incident engine consumes the existing recording manager instead of creating a separate recorder
+- Static code inspection of `static/js/exam-recording.js` and `static/js/incident-clip-engine.js` to locate the minimal change points.
+- Confirmed the new logic calls `recordingManager.getChunksForWindow(clipStart,eventElapsedMs)` at violation time and stores the returned chunk references.
+- Verified finalization merges preserved pre-event chunks with post-event chunks and deduplicates by `startElapsedMs`/`endElapsedMs`.
 
-The current environment does not provide a real live browser session for camera permission and actual media capture verification, so browser-level media proof remains a real-device validation step.
+What could not be executed in this environment:
+
+- Live browser capture (camera/microphone) validation cannot be completed here. A full runtime verification requires opening the app in a browser, allowing camera/microphone access, generating a violation at a known elapsed time, and confirming the produced Blob contains both pre- and post-event footage.
 
 ## Limitations
 
